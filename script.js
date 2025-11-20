@@ -124,6 +124,13 @@ function applyTranslations() {
   if (settleSection) settleSection.textContent = t('computeAll');
 }
 
+/**
+ * Displays a modal containing the provided share URL. The modal allows the user
+ * to copy the link to the clipboard and to open it directly in a new tab.
+ *
+ * @param {string} url The share link to display and copy.
+ */
+
 function loadData() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -320,6 +327,7 @@ const showInstructionsButton = document.getElementById('show-instructions');
 const instructionsModal = document.getElementById('instructions-modal');
 const instructionsContent = document.getElementById('instructions-content');
 const instructionsCloseButton = document.getElementById('instructions-close');
+
 
 const receiptInput = document.getElementById('receipt-input');
 const uploadInfo = document.getElementById('upload-info');
@@ -1012,33 +1020,26 @@ function renderReceipts() {
       }
       // Generate a token that encodes owner, folder and receipt id
       const token = encodeShareData(data.currentUser, fId, receipt.id);
-      // Build a base URL that works both when hosted and when opened as a file.
-      // If the page is served from a file URL, use only the filename (e.g. index.html)
-      // to create a relative link. Otherwise, combine origin and pathname.
-      let base;
-      try {
-        const href = window.location.href.split('?')[0].split('#')[0];
-        const parts = href.split('/');
-        const fileName = parts[parts.length - 1] || 'index.html';
-        if (window.location.origin && window.location.origin.startsWith('file')) {
-          base = fileName;
-        } else {
-          base = window.location.origin + '/' + fileName;
-        }
-      } catch (e) {
-        base = 'index.html';
-      }
-      const url = base + '?share=' + encodeURIComponent(token);
-      // Try to copy to clipboard for convenience. If that fails, fall back to prompt.
+      // Build a generic URL using only the file name. When the site is opened locally
+      // by another user (for example via double‑clicking index.html), this relative link
+      // can be appended to the address bar to load the shared view. Including the full
+      // file path causes the link to point to a specific machine path which will not
+      // exist on other systems. Therefore we always use only the file name here.
+      // Build a share URL based on the current page without any query parameters.
+      // This ensures that the link points back to the same location (e.g. the
+      // /kassenbonsplitter/ path when hosted on GitHub Pages) instead of the
+      // root of the domain. We strip any existing query string before appending
+      // our share token.
+      const baseUrl = window.location.href.split('?')[0];
+      const url = baseUrl + '?share=' + encodeURIComponent(token);
+      // Attempt to copy the link to the clipboard for convenience. Errors are ignored.
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(() => {
-          alert('Link zum Teilen kopiert:\n' + url);
-        }).catch(() => {
-          alert('Link zum Teilen:\n' + url);
-        });
-      } else {
-        alert('Link zum Teilen:\n' + url);
+        navigator.clipboard.writeText(url).catch(() => {});
       }
+      // Show the link in a prompt so the user can copy it easily. The link is
+      // fully qualified (it includes the current page path), so it can be
+      // pasted directly into any browser address bar and will load the shared view.
+      prompt('Link zum Teilen (bitte kopieren und direkt im Browser öffnen):', url);
     });
     actionsDiv.appendChild(shareBtn);
 
@@ -2231,18 +2232,44 @@ if (linkFolderShareButton) {
       alert('Kein Ordner ausgewählt.');
       return;
     }
-    const token = encodeShareData(data.currentUser, fId, 'folder');
-    const url = window.location.origin + window.location.pathname + '?share=' + encodeURIComponent(token);
-    // Copy to clipboard if possible, otherwise show prompt
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(() => {
-        alert('Ordner-Link kopiert:\n' + url);
-      }).catch(() => {
-        prompt('Ordner-Link zum Teilen:', url);
-      });
-    } else {
-      prompt('Ordner-Link zum Teilen:', url);
+    // Ask user which folder to share. List all own folders with indices.
+    let folders = [];
+    for (const id in user.folders) {
+      // Only allow own folders (not shared ones) to be shared via link
+      folders.push({ id, name: user.folders[id].name });
     }
+    if (folders.length === 0) {
+      alert('Es gibt keine eigenen Ordner.');
+      return;
+    }
+    let message = 'Ordner zum Teilen auswählen:\n';
+    folders.forEach((f, index) => {
+      message += `${index + 1}: ${f.name}\n`;
+    });
+    const choice = prompt(message);
+    if (!choice) return;
+    const idxSel = parseInt(choice) - 1;
+    if (isNaN(idxSel) || idxSel < 0 || idxSel >= folders.length) {
+      alert('Ungültige Auswahl.');
+      return;
+    }
+    const selectedId = folders[idxSel].id;
+    const token = encodeShareData(data.currentUser, selectedId, 'folder');
+    // Build a generic URL using only the file name. This avoids embedding the
+    // absolute file path of the current machine (which would not exist on
+    // another user’s system) and ensures that the link can be opened after
+    // index.html has been loaded locally.
+    // Build a share URL based on the current page without query parameters.
+    // Using the full current path ensures that the link points into the same
+    // project folder (e.g. /kassenbonsplitter/) rather than the root of the
+    // domain. We remove any existing query string before appending our token.
+    const baseUrl = window.location.href.split('?')[0];
+    const url = baseUrl + '?share=' + encodeURIComponent(token);
+    // Copy to clipboard if possible. Errors are ignored.
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).catch(() => {});
+    }
+    prompt('Ordner-Link (bitte kopieren und direkt im Browser öffnen):', url);
   });
 }
 
